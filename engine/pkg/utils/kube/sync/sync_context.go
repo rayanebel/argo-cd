@@ -98,6 +98,24 @@ func NewSyncContext(
 	if err != nil {
 		return nil, err
 	}
+	ctx := &syncContext{
+		resources:           groupResources(reconciliationResult),
+		hooks:               reconciliationResult.Hooks,
+		config:              restConfig,
+		dynamicIf:           dynamicIf,
+		disco:               disco,
+		extensionsclientset: extensionsclientset,
+		kubectl:             kubectl,
+		namespace:           namespace,
+		log:                 log,
+	}
+	for _, opt := range opts {
+		opt(ctx)
+	}
+	return ctx, nil
+}
+
+func groupResources(reconciliationResult ReconciliationResult) map[kubeutil.ResourceKey]reconciledResource {
 	resources := make(map[kube.ResourceKey]reconciledResource, 0)
 	for i := 0; i < len(reconciliationResult.Target); i++ {
 		res := reconciledResource{
@@ -113,21 +131,7 @@ func NewSyncContext(
 		}
 		resources[kube.GetResourceKey(obj)] = res
 	}
-	ctx := &syncContext{
-		resources:           resources,
-		hooks:               reconciliationResult.Hooks,
-		config:              restConfig,
-		dynamicIf:           dynamicIf,
-		disco:               disco,
-		extensionsclientset: extensionsclientset,
-		kubectl:             kubectl,
-		namespace:           namespace,
-		log:                 log,
-	}
-	for _, opt := range opts {
-		opt(ctx)
-	}
-	return ctx, nil
+	return resources
 }
 
 const (
