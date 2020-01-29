@@ -2993,8 +2993,14 @@ func schema_pkg_apis_application_v1alpha1_SyncOperationResource(ref common.Refer
 							Format: "",
 						},
 					},
+					"namespace": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
 				},
-				Required: []string{"kind", "name"},
+				Required: []string{"kind", "name", "namespace"},
 			},
 		},
 	}

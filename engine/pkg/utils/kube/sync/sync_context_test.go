@@ -1,7 +1,8 @@
-package controller
+package sync
 
 import (
 	"fmt"
+	"github.com/argoproj/argo-cd/controller"
 	"reflect"
 	"testing"
 
@@ -45,40 +46,16 @@ func newTestSyncCtx(resources ...*v1.APIResourceList) *syncContext {
 	sc := syncContext{
 		config:    &rest.Config{},
 		namespace: test.FakeArgoCDNamespace,
-		server:    test.FakeClusterURL,
-		syncRes: &v1alpha1.SyncOperationResult{
-			Revision: "FooBarBaz",
-		},
-		syncOp: &v1alpha1.SyncOperation{
-			Prune: true,
-			SyncStrategy: &v1alpha1.SyncStrategy{
-				Apply: &v1alpha1.SyncStrategyApply{},
-			},
-		},
-		proj: &v1alpha1.AppProject{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "test",
-			},
-			Spec: v1alpha1.AppProjectSpec{
-				Destinations: []v1alpha1.ApplicationDestination{{
-					Server:    test.FakeClusterURL,
-					Namespace: test.FakeArgoCDNamespace,
-				}},
-				ClusterResourceWhitelist: []v1.GroupKind{
-					{Group: "*", Kind: "*"},
-				},
-			},
-		},
-		opState: &v1alpha1.OperationState{},
-		disco:   fakeDisco,
-		log:     log.WithFields(log.Fields{"application": "fake-app"}),
+		revision:  "FooBarBaz",
+		disco:     fakeDisco,
+		log:       log.WithFields(log.Fields{"application": "fake-app"}),
 	}
 	sc.kubectl = &kubetest.MockKubectlCmd{}
 	return &sc
 }
 
-func newManagedResource(live *unstructured.Unstructured) managedResource {
-	return managedResource{
+func newManagedResource(live *unstructured.Unstructured) controller.managedResource {
+	return controller.managedResource{
 		Live:      live,
 		Group:     live.GroupVersionKind().Group,
 		Version:   live.GroupVersionKind().Version,
@@ -92,8 +69,8 @@ func TestSyncNotPermittedNamespace(t *testing.T) {
 	syncCtx := newTestSyncCtx()
 	targetPod := test.NewPod()
 	targetPod.SetNamespace("kube-system")
-	syncCtx.compareResult = &comparisonResult{
-		managedResources: []managedResource{{
+	syncCtx.compareResult = &controller.comparisonResult{
+		managedResources: []controller.managedResource{{
 			Live:   nil,
 			Target: targetPod,
 		}, {
@@ -108,8 +85,8 @@ func TestSyncNotPermittedNamespace(t *testing.T) {
 
 func TestSyncCreateInSortedOrder(t *testing.T) {
 	syncCtx := newTestSyncCtx()
-	syncCtx.compareResult = &comparisonResult{
-		managedResources: []managedResource{{
+	syncCtx.compareResult = &controller.comparisonResult{
+		managedResources: []controller.managedResource{{
 			Live:   nil,
 			Target: test.NewPod(),
 		}, {
@@ -152,8 +129,8 @@ func TestSyncCreateNotWhitelistedClusterResources(t *testing.T) {
 	}
 
 	syncCtx.kubectl = &kubetest.MockKubectlCmd{}
-	syncCtx.compareResult = &comparisonResult{
-		managedResources: []managedResource{{
+	syncCtx.compareResult = &controller.comparisonResult{
+		managedResources: []controller.managedResource{{
 			Live: nil,
 			Target: kube.MustToUnstructured(&rbacv1.ClusterRole{
 				TypeMeta:   metav1.TypeMeta{Kind: "ClusterRole", APIVersion: "rbac.authorization.k8s.io/v1"},
@@ -174,8 +151,8 @@ func TestSyncBlacklistedNamespacedResources(t *testing.T) {
 		{Group: "*", Kind: "Deployment"},
 	}
 
-	syncCtx.compareResult = &comparisonResult{
-		managedResources: []managedResource{{
+	syncCtx.compareResult = &controller.comparisonResult{
+		managedResources: []controller.managedResource{{
 			Live:   nil,
 			Target: test.NewDeployment(),
 		}},
@@ -191,8 +168,8 @@ func TestSyncSuccessfully(t *testing.T) {
 	syncCtx := newTestSyncCtx()
 	pod := test.NewPod()
 	pod.SetNamespace(test.FakeArgoCDNamespace)
-	syncCtx.compareResult = &comparisonResult{
-		managedResources: []managedResource{{
+	syncCtx.compareResult = &controller.comparisonResult{
+		managedResources: []controller.managedResource{{
 			Live:   nil,
 			Target: test.NewService(),
 		}, {
@@ -223,8 +200,8 @@ func TestSyncDeleteSuccessfully(t *testing.T) {
 	svc.SetNamespace(test.FakeArgoCDNamespace)
 	pod := test.NewPod()
 	pod.SetNamespace(test.FakeArgoCDNamespace)
-	syncCtx.compareResult = &comparisonResult{
-		managedResources: []managedResource{{
+	syncCtx.compareResult = &controller.comparisonResult{
+		managedResources: []controller.managedResource{{
 			Live:   svc,
 			Target: nil,
 		}, {
@@ -259,8 +236,8 @@ func TestSyncCreateFailure(t *testing.T) {
 			},
 		},
 	}
-	syncCtx.compareResult = &comparisonResult{
-		managedResources: []managedResource{{
+	syncCtx.compareResult = &controller.comparisonResult{
+		managedResources: []controller.managedResource{{
 			Live:   nil,
 			Target: testSvc,
 		}},
@@ -285,8 +262,8 @@ func TestSyncPruneFailure(t *testing.T) {
 	testSvc := test.NewService()
 	testSvc.SetName("test-service")
 	testSvc.SetNamespace(test.FakeArgoCDNamespace)
-	syncCtx.compareResult = &comparisonResult{
-		managedResources: []managedResource{{
+	syncCtx.compareResult = &controller.comparisonResult{
+		managedResources: []controller.managedResource{{
 			Live:   testSvc,
 			Target: nil,
 		}},
@@ -309,7 +286,7 @@ func TestDontSyncOrPruneHooks(t *testing.T) {
 	liveSvc.SetNamespace(test.FakeArgoCDNamespace)
 	liveSvc.SetAnnotations(map[string]string{common.AnnotationKeyHook: "PreSync"})
 
-	syncCtx.compareResult = &comparisonResult{
+	syncCtx.compareResult = &controller.comparisonResult{
 		hooks: []*unstructured.Unstructured{targetPod, liveSvc},
 	}
 	syncCtx.sync()
@@ -324,7 +301,7 @@ func TestDontPrunePruneFalse(t *testing.T) {
 	pod := test.NewPod()
 	pod.SetAnnotations(map[string]string{common.AnnotationSyncOptions: "Prune=false"})
 	pod.SetNamespace(test.FakeArgoCDNamespace)
-	syncCtx.compareResult = &comparisonResult{managedResources: []managedResource{{Live: pod}}}
+	syncCtx.compareResult = &controller.comparisonResult{managedResources: []controller.managedResource{{Live: pod}}}
 
 	syncCtx.sync()
 
@@ -355,7 +332,7 @@ func TestSyncOptionValidate(t *testing.T) {
 			pod := test.NewPod()
 			pod.SetAnnotations(map[string]string{common.AnnotationSyncOptions: tt.annotationVal})
 			pod.SetNamespace(test.FakeArgoCDNamespace)
-			syncCtx.compareResult = &comparisonResult{managedResources: []managedResource{{Target: pod, Live: pod}}}
+			syncCtx.compareResult = &controller.comparisonResult{managedResources: []controller.managedResource{{Target: pod, Live: pod}}}
 
 			syncCtx.sync()
 
@@ -371,8 +348,8 @@ func TestSelectiveSyncOnly(t *testing.T) {
 	pod1.SetName("pod-1")
 	pod2 := test.NewPod()
 	pod2.SetName("pod-2")
-	syncCtx.compareResult = &comparisonResult{
-		managedResources: []managedResource{{Target: pod1}},
+	syncCtx.compareResult = &controller.comparisonResult{
+		managedResources: []controller.managedResource{{Target: pod1}},
 	}
 	syncCtx.syncResources = []v1alpha1.SyncOperationResource{{Kind: "Pod", Name: "pod-1"}}
 
@@ -389,7 +366,7 @@ func TestUnnamedHooksGetUniqueNames(t *testing.T) {
 	pod := test.NewPod()
 	pod.SetName("")
 	pod.SetAnnotations(map[string]string{common.AnnotationKeyHook: "PreSync,PostSync"})
-	syncCtx.compareResult = &comparisonResult{hooks: []*unstructured.Unstructured{pod}}
+	syncCtx.compareResult = &controller.comparisonResult{hooks: []*unstructured.Unstructured{pod}}
 
 	tasks, successful := syncCtx.getSyncTasks()
 
@@ -404,7 +381,7 @@ func TestManagedResourceAreNotNamed(t *testing.T) {
 	syncCtx := newTestSyncCtx()
 	pod := test.NewPod()
 	pod.SetName("")
-	syncCtx.compareResult = &comparisonResult{managedResources: []managedResource{{Target: pod}}}
+	syncCtx.compareResult = &controller.comparisonResult{managedResources: []controller.managedResource{{Target: pod}}}
 
 	tasks, successful := syncCtx.getSyncTasks()
 
@@ -419,8 +396,8 @@ func TestDeDupingTasks(t *testing.T) {
 	syncCtx.syncOp.SyncStrategy.Apply = nil
 	pod := test.NewPod()
 	pod.SetAnnotations(map[string]string{common.AnnotationKeyHook: "Sync"})
-	syncCtx.compareResult = &comparisonResult{
-		managedResources: []managedResource{{Target: pod}},
+	syncCtx.compareResult = &controller.comparisonResult{
+		managedResources: []controller.managedResource{{Target: pod}},
 		hooks:            []*unstructured.Unstructured{pod},
 	}
 
@@ -433,7 +410,7 @@ func TestDeDupingTasks(t *testing.T) {
 func TestObjectsGetANamespace(t *testing.T) {
 	syncCtx := newTestSyncCtx()
 	pod := test.NewPod()
-	syncCtx.compareResult = &comparisonResult{managedResources: []managedResource{{Target: pod}}}
+	syncCtx.compareResult = &controller.comparisonResult{managedResources: []controller.managedResource{{Target: pod}}}
 
 	tasks, successful := syncCtx.getSyncTasks()
 
@@ -444,7 +421,7 @@ func TestObjectsGetANamespace(t *testing.T) {
 }
 
 func TestPersistRevisionHistory(t *testing.T) {
-	app := newFakeApp()
+	app := controller.newFakeApp()
 	app.Status.OperationState = nil
 	app.Status.History = nil
 
@@ -454,7 +431,7 @@ func TestPersistRevisionHistory(t *testing.T) {
 			Name:      "default",
 		},
 	}
-	data := fakeData{
+	data := controller.fakeData{
 		apps: []runtime.Object{app, defaultProject},
 		manifestResponse: &apiclient.ManifestResponse{
 			Manifests: []string{},
@@ -464,7 +441,7 @@ func TestPersistRevisionHistory(t *testing.T) {
 		},
 		managedLiveObjs: make(map[kube.ResourceKey]*unstructured.Unstructured),
 	}
-	ctrl := newFakeController(&data)
+	ctrl := controller.newFakeController(&data)
 
 	// Sync with source unspecified
 	opState := &v1alpha1.OperationState{Operation: v1alpha1.Operation{
@@ -482,7 +459,7 @@ func TestPersistRevisionHistory(t *testing.T) {
 }
 
 func TestPersistRevisionHistoryRollback(t *testing.T) {
-	app := newFakeApp()
+	app := controller.newFakeApp()
 	app.Status.OperationState = nil
 	app.Status.History = nil
 	defaultProject := &v1alpha1.AppProject{
@@ -491,7 +468,7 @@ func TestPersistRevisionHistoryRollback(t *testing.T) {
 			Name:      "default",
 		},
 	}
-	data := fakeData{
+	data := controller.fakeData{
 		apps: []runtime.Object{app, defaultProject},
 		manifestResponse: &apiclient.ManifestResponse{
 			Manifests: []string{},
@@ -501,7 +478,7 @@ func TestPersistRevisionHistoryRollback(t *testing.T) {
 		},
 		managedLiveObjs: make(map[kube.ResourceKey]*unstructured.Unstructured),
 	}
-	ctrl := newFakeController(&data)
+	ctrl := controller.newFakeController(&data)
 
 	// Sync with source specified
 	source := v1alpha1.ApplicationSource{
@@ -533,8 +510,8 @@ func TestPersistRevisionHistoryRollback(t *testing.T) {
 func TestSyncFailureHookWithSuccessfulSync(t *testing.T) {
 	syncCtx := newTestSyncCtx()
 	syncCtx.syncOp.SyncStrategy.Apply = nil
-	syncCtx.compareResult = &comparisonResult{
-		managedResources: []managedResource{{Target: test.NewPod()}},
+	syncCtx.compareResult = &controller.comparisonResult{
+		managedResources: []controller.managedResource{{Target: test.NewPod()}},
 		hooks:            []*unstructured.Unstructured{test.NewHook(HookTypeSyncFail)},
 	}
 
@@ -549,8 +526,8 @@ func TestSyncFailureHookWithFailedSync(t *testing.T) {
 	syncCtx := newTestSyncCtx()
 	syncCtx.syncOp.SyncStrategy.Apply = nil
 	pod := test.NewPod()
-	syncCtx.compareResult = &comparisonResult{
-		managedResources: []managedResource{{Target: pod}},
+	syncCtx.compareResult = &controller.comparisonResult{
+		managedResources: []controller.managedResource{{Target: pod}},
 		hooks:            []*unstructured.Unstructured{test.NewHook(HookTypeSyncFail)},
 	}
 	syncCtx.kubectl = &kubetest.MockKubectlCmd{
@@ -569,8 +546,8 @@ func TestBeforeHookCreation(t *testing.T) {
 	syncCtx.syncOp.SyncStrategy.Apply = nil
 	hook := test.Annotate(test.Annotate(test.NewPod(), common.AnnotationKeyHook, "Sync"), common.AnnotationKeyHookDeletePolicy, "BeforeHookCreation")
 	hook.SetNamespace(test.FakeArgoCDNamespace)
-	syncCtx.compareResult = &comparisonResult{
-		managedResources: []managedResource{newManagedResource(hook)},
+	syncCtx.compareResult = &controller.comparisonResult{
+		managedResources: []controller.managedResource{newManagedResource(hook)},
 		hooks:            []*unstructured.Unstructured{hook},
 	}
 	syncCtx.dynamicIf = fake.NewSimpleDynamicClient(runtime.NewScheme())
@@ -590,8 +567,8 @@ func TestRunSyncFailHooksFailed(t *testing.T) {
 	successfulSyncFailHook.SetName("successful-sync-fail-hook")
 	failedSyncFailHook := test.NewHook(HookTypeSyncFail)
 	failedSyncFailHook.SetName("failed-sync-fail-hook")
-	syncCtx.compareResult = &comparisonResult{
-		managedResources: []managedResource{{Target: pod}},
+	syncCtx.compareResult = &controller.comparisonResult{
+		managedResources: []controller.managedResource{{Target: pod}},
 		hooks:            []*unstructured.Unstructured{successfulSyncFailHook, failedSyncFailHook},
 	}
 
@@ -620,12 +597,12 @@ func TestRunSyncFailHooksFailed(t *testing.T) {
 
 func Test_syncContext_isSelectiveSync(t *testing.T) {
 	type fields struct {
-		compareResult *comparisonResult
+		compareResult *controller.comparisonResult
 		syncResources []SyncOperationResource
 	}
 	oneSyncResource := []SyncOperationResource{{}}
-	oneResource := func(group, kind, name string, hook bool) *comparisonResult {
-		return &comparisonResult{resources: []v1alpha1.ResourceStatus{{Group: group, Kind: kind, Name: name, Hook: hook}}}
+	oneResource := func(group, kind, name string, hook bool) *controller.comparisonResult {
+		return &controller.comparisonResult{resources: []v1alpha1.ResourceStatus{{Group: group, Kind: kind, Name: name, Hook: hook}}}
 	}
 	tests := []struct {
 		name   string
@@ -634,9 +611,9 @@ func Test_syncContext_isSelectiveSync(t *testing.T) {
 	}{
 		{"Empty", fields{}, false},
 		{"OneCompareResult", fields{oneResource("", "", "", false), []SyncOperationResource{}}, true},
-		{"OneSyncResource", fields{&comparisonResult{}, oneSyncResource}, true},
+		{"OneSyncResource", fields{&controller.comparisonResult{}, oneSyncResource}, true},
 		{"Equal", fields{oneResource("", "", "", false), oneSyncResource}, false},
-		{"EqualOutOfOrder", fields{&comparisonResult{resources: []v1alpha1.ResourceStatus{{Group: "a"}, {Group: "b"}}}, []SyncOperationResource{{Group: "b"}, {Group: "a"}}}, false},
+		{"EqualOutOfOrder", fields{&controller.comparisonResult{resources: []v1alpha1.ResourceStatus{{Group: "a"}, {Group: "b"}}}, []SyncOperationResource{{Group: "b"}, {Group: "a"}}}, false},
 		{"KindDifferent", fields{oneResource("foo", "", "", false), oneSyncResource}, true},
 		{"GroupDifferent", fields{oneResource("", "foo", "", false), oneSyncResource}, true},
 		{"NameDifferent", fields{oneResource("", "", "foo", false), oneSyncResource}, true},
@@ -657,7 +634,7 @@ func Test_syncContext_isSelectiveSync(t *testing.T) {
 
 func Test_syncContext_liveObj(t *testing.T) {
 	type fields struct {
-		compareResult *comparisonResult
+		compareResult *controller.comparisonResult
 	}
 	type args struct {
 		obj *unstructured.Unstructured
@@ -673,9 +650,9 @@ func Test_syncContext_liveObj(t *testing.T) {
 		args   args
 		want   *unstructured.Unstructured
 	}{
-		{"None", fields{compareResult: &comparisonResult{managedResources: []managedResource{}}}, args{obj: &unstructured.Unstructured{}}, nil},
-		{"Found", fields{compareResult: &comparisonResult{managedResources: []managedResource{{Group: obj.GroupVersionKind().Group, Kind: obj.GetKind(), Namespace: obj.GetNamespace(), Name: obj.GetName(), Live: found}}}}, args{obj: obj}, found},
-		{"EmptyNamespace", fields{compareResult: &comparisonResult{managedResources: []managedResource{{Group: obj.GroupVersionKind().Group, Kind: obj.GetKind(), Name: obj.GetName(), Live: found}}}}, args{obj: obj}, found},
+		{"None", fields{compareResult: &controller.comparisonResult{managedResources: []controller.managedResource{}}}, args{obj: &unstructured.Unstructured{}}, nil},
+		{"Found", fields{compareResult: &controller.comparisonResult{managedResources: []controller.managedResource{{Group: obj.GroupVersionKind().Group, Kind: obj.GetKind(), Namespace: obj.GetNamespace(), Name: obj.GetName(), Live: found}}}}, args{obj: obj}, found},
+		{"EmptyNamespace", fields{compareResult: &controller.comparisonResult{managedResources: []controller.managedResource{{Group: obj.GroupVersionKind().Group, Kind: obj.GetKind(), Name: obj.GetName(), Live: found}}}}, args{obj: obj}, found},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -691,9 +668,9 @@ func Test_syncContext_liveObj(t *testing.T) {
 
 func Test_syncContext_hasCRDOfGroupKind(t *testing.T) {
 	// target
-	assert.False(t, (&syncContext{compareResult: &comparisonResult{managedResources: []managedResource{{Target: test.NewCRD()}}}}).hasCRDOfGroupKind("", ""))
-	assert.True(t, (&syncContext{compareResult: &comparisonResult{managedResources: []managedResource{{Target: test.NewCRD()}}}}).hasCRDOfGroupKind("argoproj.io", "TestCrd"))
+	assert.False(t, (&syncContext{compareResult: &controller.comparisonResult{managedResources: []controller.managedResource{{Target: test.NewCRD()}}}}).hasCRDOfGroupKind("", ""))
+	assert.True(t, (&syncContext{compareResult: &controller.comparisonResult{managedResources: []controller.managedResource{{Target: test.NewCRD()}}}}).hasCRDOfGroupKind("argoproj.io", "TestCrd"))
 	// hook
-	assert.False(t, (&syncContext{compareResult: &comparisonResult{hooks: []*unstructured.Unstructured{test.NewCRD()}}}).hasCRDOfGroupKind("", ""))
-	assert.True(t, (&syncContext{compareResult: &comparisonResult{hooks: []*unstructured.Unstructured{test.NewCRD()}}}).hasCRDOfGroupKind("argoproj.io", "TestCrd"))
+	assert.False(t, (&syncContext{compareResult: &controller.comparisonResult{hooks: []*unstructured.Unstructured{test.NewCRD()}}}).hasCRDOfGroupKind("", ""))
+	assert.True(t, (&syncContext{compareResult: &controller.comparisonResult{hooks: []*unstructured.Unstructured{test.NewCRD()}}}).hasCRDOfGroupKind("argoproj.io", "TestCrd"))
 }
